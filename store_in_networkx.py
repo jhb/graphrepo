@@ -1,6 +1,6 @@
 import networkx as nx
 
-from store import Store, NonExistent
+from store import Store, NonExistent, Node
 
 class NetworkXStore(Store):
     supports_properties = 1
@@ -11,20 +11,17 @@ class NetworkXStore(Store):
     def setup_store(self):
         self.G = nx.DiGraph()
 
-    def create(self, nodeid=None, properties=None):
-        if properties is None:
-            properties = {}
-        self.G.add_node(nodeid, **properties)
+    def write(self, node):
+        self.G.add_node(node.id, **node)
 
-    def read(self, nodeid):
-        return self.G.nodes[nodeid]
+    def read(self, nodeid, blob=1):
+        return Node(nodeid, **self.G.nodes[nodeid])
 
-    def update(self, nodeid, update=None, properties=None):
-
-        if update is not None:
-            self.G.nodes[nodeid].update(update)
-        elif properties is not None:
-            self.G.add_node(nodeid, **properties)
+    def update(self, node, update_only=True):
+        if update_only:
+            self.G.nodes[node.id].update(node)
+        else:
+            self.write(node)
 
     def delete(self, nodeid):
         self.G.remove_node(nodeid)
@@ -36,4 +33,5 @@ class NetworkXStore(Store):
             return all(node.get(k, NonExistent) == v for k, v in searchterms.items())
 
         subgraph = nx.subgraph_view(self.G, filter_node=filter_node)
-        return subgraph.nodes()
+        nodes = subgraph.nodes()
+        return nodes

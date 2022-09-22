@@ -2,14 +2,14 @@ from collections.abc import Iterable
 
 from neo4j import GraphDatabase
 
-from store import Store
+from store import Store, Node
 
 
 class Neo4jStore(Store):
     supports_properties = 1
     supports_graph = 1
     supports_search = 1
-    supports_fulltext = 1
+    supports_fulltext = 0
 
     def __init__(self, name='', **connection_details):
         self.tx = None
@@ -43,24 +43,29 @@ class Neo4jStore(Store):
         self.tx.close()
         self.tx = None
 
-    def create(self, nodeid=None, properties=None):
-        if properties is None:
-            properties = {}
-        properties = self._enrich(nodeid, properties)
-        return self.run('create (n:Node) set n=$properties return n', properties=properties).single()['n']
+    def _neo2node(self,neonode):
+        return Node(neonode['_id'], {k: v for k, v in neonode.items() if k not in  [self.fulltext_property, '_id']})
+
+    def write(self, node):
+        properties = self._enrich(node.id, node)
+        neonode = self.run('create (n:Node) set n=$properties return n', properties=properties).single()['n']
+        return self._neo2node(neonode)
 
     def read(self, nodeid):
-        n = self.run('match (n:Node) where n._id=$nodeid return n', nodeid=nodeid).single()['n']
-        return dict(n)
+        neonode = self.run('match (n:Node) where n._id=$nodeid return n', nodeid=nodeid).single()['n']
+        return self._neo2node(neonode)
 
-    def update(self, nodeid, update=None, properties=None):
-        if update is not None:
-            ...
-        elif properties is not None:
-            properties = self._enrich(nodeid, properties)
-            n = self.run('match (n:Node) where n._id=$nodeid set n=$properties return n',
-                         nodeid=nodeid,
-                         properties=properties).single()['n']
+    def update(self, node, update_only=True):
+        if update_only:
+            update_node = self.read(node.id)
+            update_node.update(node)
+            node = update_node
+
+        properties = self._enrich(node.id, node)
+
+        n = self.run('match (n:Node) where n._id=$nodeid set n=$properties return n',
+                     nodeid=node.id,
+                     properties=properties).single()['n']
 
     def delete(self, nodeid):
         self.run('match (n:Node) where n._id=$nodeid delete n', nodeid=nodeid)
@@ -73,7 +78,7 @@ class Neo4jStore(Store):
         return [row['_id'] for row in result]
 
     def fulltext(self, searchterm):
-        result = self.run('call db.index.fulltext.queryNodes("_fulltext", $searchterm) yield node, score return '
+        result = self.run('call db.index.fulltext.queryNodes("fulltext", $searchterm) yield node, score return '
                           'node._id as _id',
                           searchterm=searchterm)
         return [row['_id'] for row in result]

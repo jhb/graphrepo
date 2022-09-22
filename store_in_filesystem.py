@@ -2,17 +2,17 @@ import glob
 import os
 import shutil
 
-from store import Store
+from store import Store, Node
 import mimetypes
 
 import yaml
 
 class FilesystemStore(Store):
-    supports_properties = 1
+    supports_properties = 0
     supports_blobs = 1
     needs_undo = 1
     dirname = 'fsstorage'
-    marker = 'in_file::'
+    content_filename_property = '___content_filename___'
 
     def _clear(self):
         for root, dirs, files in os.walk(self.dirname):
@@ -26,32 +26,39 @@ class FilesystemStore(Store):
         os.makedirs(self.dirname, exist_ok=True)
         self.undo_log = []
 
-    def create(self, nodeid=None, properties=None):
-        if properties is None:
-            properties = {}
+    def write(self, node):
 
-        if self.blob_content_type in properties and self.blob_content_data in properties:
-            blob_extension = mimetypes.guess_extension(properties[self.blob_content_type])
-            blob_filename = f'{nodeid}{blob_extension}'
-            data = properties[self.blob_content_data]
-            properties[self.blob_content_data]=f'{self.marker}{blob_filename}'
-            open(os.path.join(self.dirname,blob_filename),'w').write(data)
-        yaml_filename = f'{nodeid}.yaml'
-        yaml_content = yaml.safe_dump(properties)
+        if node.content is not None:
+            if self.type_property in node:
+                blob_extension = mimetypes.guess_extension(node[self.type_property])
+            else:
+                blob_extension = '.bin'
+            content_filename = f'{node.id}{blob_extension}'
+            node = node.clone()
+            node[self.content_filename_property]= content_filename
+            open(os.path.join(self.dirname,content_filename),'w').write(node.content)
+        yaml_filename = f'{node.id}.yaml'
+        yaml_content = yaml.safe_dump(dict(node))
         open(os.path.join(self.dirname,yaml_filename),'w').write(yaml_content)
 
-    def read(self, nodeid):
+    def read(self, nodeid, clean=True):
         yaml_content = open(os.path.join(self.dirname, f'{nodeid}.yaml'))
-        properties = yaml.safe_load(yaml_content)
-        if self.blob_content_data in properties and self.blob_content_type in properties:
-            location = properties[self.blob_content_data]
-            filename = location.split(self.marker)[1]
-            properties[self.blob_content_data] = open(filename).read()
-        return properties
+        node = Node(nodeid, **yaml.safe_load(yaml_content))
+        if self.content_filename_property in node:
+            location = node[self.content_filename_property]
+            node.content = open(os.path.join(self.dirname,location)).read()
+        if clean and self.content_filename_property in node:
+            del(node[self.content_filename_property])
+        return node
 
-    def update(self, nodeid, update=None, properties=None):
-        self.delete(nodeid)
-        self.create(nodeid,properties=properties)
+    def update(self, node, update_only=True):
+
+        if update_only:
+            update_node = self.read(node.id, clean=False)
+            update_node.update(node)
+            node = update_node
+        self.delete(node.id)
+        self.write(node)
 
     def delete(self, nodeid):
         pattern = os.path.join(self.dirname, f'{nodeid}**')

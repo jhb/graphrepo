@@ -5,7 +5,8 @@ from whoosh.index import create_in, open_dir
 from whoosh.qparser import QueryParser
 from whoosh.query import Term
 
-from store import Store
+from store import Store, Node
+
 
 class WhooshStore(Store):
     supports_search = 1
@@ -13,7 +14,8 @@ class WhooshStore(Store):
     needs_undo = 1
 
     def setup_store(self):
-        self.schema = wf.Schema(fulltext=wf.TEXT(stored=True), id=wf.ID(stored=True, unique=True))
+        self.schema = wf.Schema(fulltext=wf.TEXT(stored=True),
+                                id=wf.ID(stored=True, unique=True))
         if not os.path.exists('indexdir'):
             os.makedirs('indexdir', exist_ok=True)
             self.ix = create_in("indexdir", self.schema)
@@ -22,24 +24,28 @@ class WhooshStore(Store):
         self.parser = QueryParser("fulltext", self.schema)
         self.undo_log = []
 
-    def create(self, nodeid=None, properties=None):
-        if properties is None:
-            properties = {}
-        properties = self._enrich(nodeid, properties)
+    def write(self, node):
+
+        properties = self._enrich(node.id, node)
         with self.ix.writer() as writer:
-            writer.add_document(fulltext=properties['_fulltext'], id=nodeid)
+            writer.add_document(fulltext=properties[self.fulltext_property],
+                                id=node.id)
 
     def read(self, nodeid):
+        """This is only for undo"""
         query = Term('id', nodeid)
         with self.ix.searcher() as searcher:
             result = searcher.search(query)
             doc = result[0]
-            return dict(_fulltext=doc['fulltext'], _id=doc['id'])
+            node = Node(doc['id'])
+            node[self.fulltext_property]=doc['fulltext']
+            return node
 
-    def update(self, nodeid, update=None, properties=None):
-        properties = self._enrich(nodeid, properties)
+    def update(self, node, update_only=True):
+        properties = self._enrich(node.id, node)
         with self.ix.writer() as writer:
-            writer.update_document(fulltext=properties['_fulltext'], id=nodeid)
+            writer.update_document(fulltext=properties[self.fulltext_property],
+                                   id=node.id)
 
     def delete(self, nodeid):
         self.ix.delete_by_term('id', nodeid)

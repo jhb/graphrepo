@@ -1,8 +1,9 @@
-from typing import Union
+from typing import Union, List
 
 from repository import Node, Edge, Repository
 
 NonExistent = '____ a totally nonexistent value ____'
+
 
 class Store:
     supports_properties = 0
@@ -16,34 +17,36 @@ class Store:
                  name='',
                  **connection_details):
         self.name = name
-        self.repo:Union[Repository,None] = None
+        self.repo: Union[Repository, None] = None
         self.connection_details = connection_details
 
         self.search_properties = None
         self.fulltext_properties = None
-        self.blob_content_data = 'content_data'
-        self.blob_content_type = 'content_type'
-
-        self.undo_log=[]
+        self.filename_property = 'content_data'
+        self.type_property = 'content_type'
+        self.fulltext_property = '___fulltext___'
+        self.undo_log = []
         self.setup_store()
 
     def setup_store(self):
         ...
 
-    def _enrich(self, object_id, properties):
-        properties = dict(properties)
+    def _enrich(self, object_id, node):
+        properties = dict(node)
         properties['_id'] = object_id
-        if self.supports_fulltext and '_fulltext' not in properties:
+        if self.supports_fulltext and self.fulltext_property not in properties:
             fulltext = []
+            if node.content and type(node.content) == str:
+                fulltext.append(f'content {node.content}')
             for k, v in properties.items():
-                if k == '_fulltext':
+                if k == self.fulltext_property:
                     continue
                 fulltext.append(k)
-                if type(v) in [list,tuple]:
+                if type(v) in [list, tuple]:
                     fulltext.extend([str(i) for i in v])
                 else:
                     fulltext.append(str(v))
-            properties['_fulltext']=' '.join(fulltext)
+            properties[self.fulltext_property] = ' '.join(fulltext)
         return properties
 
     def _id(self, obj_or_id):
@@ -58,19 +61,19 @@ class Store:
     def abort(self):
         raise NotImplementedError
 
-    def create(self, nodeid=None, properties=None):
+    def write(self, node: Node):
         raise NotImplementedError
 
     def read(self, nodeid):
         raise NotImplementedError
 
-    def update(self, nodeid, update=None, properties=None):
+    def update(self, node, update_only=True):
         raise NotImplementedError
 
     def delete(self, nodeid):
         raise NotImplementedError
 
-    def search(self, **searchterms):
+    def search(self, **searchterms) -> List[str]:
         raise NotImplementedError
 
     def fulltext(self, query):

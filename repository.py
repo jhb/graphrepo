@@ -1,9 +1,27 @@
 import uuid
+from typing import List
 
 
 class Node(dict):
-    ...
 
+    def __init__(self,
+                 id=None,
+                 content=None,
+                 /,  # end of positional only arguments
+                 **kwargs
+                 ):
+
+        super().__init__(self, **kwargs)
+        self.id = id
+        self.content = content
+
+    def __str__(self):  # sourcery skip: replace-interpolation-with-fstring
+        return (f'Node({self.id}, '
+                f'{self.content and "..." or None}, '
+                f'{", ".join(["%s=%s" % (k, repr(v)) for k, v in self.items()])})')
+
+    def clone(self):
+        return Node(self.id,self.content, **self)
 
 class Edge(dict):
     ...
@@ -12,15 +30,15 @@ class Edge(dict):
 class Repository:
 
     def __init__(self,
+                 type_property = 'content_type',
+                 filename_property = 'content_filename',
                  search_properties=None,
-                 fulltext_properties=None,
-                 blob_content_data='content_data',
-                 blob_content_type='content_type'):
+                 fulltext_properties=None,):
 
+        self.type_property = type_property
+        self.filename_property = filename_property
         self.search_properties = search_properties
         self.fulltext_properties = fulltext_properties
-        self.blob_content_data = blob_content_data
-        self.blob_content_type = blob_content_type
         self.stores = {}
 
     def _make_id(self):
@@ -29,10 +47,10 @@ class Repository:
     def add_store(self, store):
         store.repo = self
 
+        store.type_property = self.type_property
+        store.filename_property = self.filename_property
         store.search_properties = self.search_properties
         store.fulltext_properties = self.fulltext_properties
-        store.blob_content_data = self.blob_content_data
-        store.blob_content_type = self.blob_content_type
 
         self.stores[store.name] = store
 
@@ -53,49 +71,65 @@ class Repository:
     def abort(self):
         for name, store in self.stores.items():
             if store.needs_undo:
-                for method, nodeid, params in reversed(store.undo_log):
-                    if params:
-                        method(nodeid, **params)
-                    else:
-                        method(nodeid)
+                for method, *args in reversed(store.undo_log):
+                    method(*args)
                 store.undo_log = []
             else:
                 store.abort()
 
-    def create(self, nodeid=None, properties=None):
-        if properties is None:
-            properties = {}
-        if nodeid is None:
-            nodeid = self._make_id()
+    def write(self, node: Node):
+        if node.id is None:
+            node.id = self._make_id()
+
         for name, store in self.stores.items():
             if store.needs_undo:
-                store.undo_log.append((store.delete, nodeid, {}))
-            store.create(nodeid=nodeid, properties=properties)
-        node = Node(**properties)
-        node.id = nodeid
+                store.undo_log.append((store.delete, node.id))
+            store.write(node)
         return node
 
-    def read(self, nodeid):
-        for name, store in self.stores.items():
-            if store.supports_properties:
-                node = Node(store.read(nodeid))
-                node.id = nodeid
-                return node
-        raise Exception('no property store found')
+    def read(self, nodeid, properties=True, blob=True):
 
-    def update(self, nodeid, update=None, properties=None):
+        stores = sorted(self.stores.values(), key=lambda x: x.supports_blobs, reverse=True)
+        property_stores = [store for store in stores if store.supports_properties]
+        blob_stores = [store for store in stores if store.supports_blobs]
+
+        properties = properties and property_stores
+        blob = blob and blob_stores
+
+        has_blob = False
+        has_properties = False
+        node = Node(nodeid)
+
+        for store in stores:
+            if properties and not has_properties and store.supports_properties:
+                node.update(store.read(nodeid))
+                has_properties = True
+                # print(f'properties from {store.name}')
+            if blob and not has_blob and store.supports_blobs:
+                node.content = store.read(nodeid).content
+                has_blob = True
+                # print(f'blob from {store.name}')
+
+        if (not properties or has_properties) and (not blob or has_blob):
+            return node
+
+        raise Exception((f'could not read: properties required: {properties}, {has_properties}, '
+                        f'blob required: {blob}, {has_blob}'))
+
+    def update(self, node: Node, update_only=True):
+
         for name, store in self.stores.items():
             if store.needs_undo:
-                store.undo_log.append((store.update, nodeid, dict(properties=store.read(nodeid))))
-            store.update(nodeid, update=update, properties=properties)
+                store.undo_log.append((store.update, store.read(node.id)))
+            store.update(node, update_only)
 
     def delete(self, nodeid):
         for name, store in self.stores.items():
             if store.needs_undo:
-                store.undo_log.append((self.create, nodeid, dict(properties=self.read(nodeid))))
+                store.undo_log.append((self.write, store.read(nodeid)))
             store.delete(nodeid)
 
-    def search(self, **searchterms):
+    def search(self, **searchterms) -> List[str]:
         for name, store in self.stores.items():
             if store.supports_search:
                 return store.search(**searchterms)
@@ -110,7 +144,7 @@ class Repository:
     # properties
     # graph
 
-    def create_edge(self, _source, _reltype, _target, id=None, properties=None):
+    def write_edge(self, _source, _reltype, _target, id=None, properties=None):
         ...
 
     def read_edge(self, id):
