@@ -1,3 +1,8 @@
+"""
+These are no proper tests, but just a workscript to try
+
+"""
+
 import os
 import shutil
 
