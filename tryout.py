@@ -6,6 +6,7 @@ These are no proper tests, but just a workscript to try
 import os
 import shutil
 
+from graphrepo.store_in_memgraph import MemgraphStore
 from repository import Repository, Node
 from store_in_neo4j import Neo4jStore
 from store_in_networkx import NetworkXStore
@@ -31,7 +32,6 @@ neo = Neo4jStore('neo4j',
                  password='admin')
 neo.run('create index _id if not exists for (n:Node) on (n._id)')
 neo.run(f'create fulltext index fulltext if not exists for (n:Node) on each [n.{neo.fulltext_property}]')
-
 neo.commit()
 neo.run('match (n) detach delete n')
 neo.commit()
@@ -40,7 +40,11 @@ repo.add_store(neo)
 fsstore = FilesystemStore('fsstore')
 fsstore._clear()
 repo.add_store(fsstore)
-#
+
+mg_store = MemgraphStore()
+mg_store.run('match (n) detach delete n')
+mg_store.commit()
+repo.add_store(mg_store)
 
 repo.begin()
 
